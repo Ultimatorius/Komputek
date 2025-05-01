@@ -1,4 +1,4 @@
-Proje Hakkında AI Yorumu :
+* Proje Hakkında AI Yorumu *
 
 Merhaba! Projenin güncel halini inceledim. NTFS Master File Table (MFT) okuyarak dosya sistemini indeksleyen ve SQLite veritabanı kullanarak arama yapmayı sağlayan oldukça kapsamlı ve teknik bir çalışma olmuş.
 
@@ -28,26 +28,28 @@ MFT Data Run'larını ayrıştırma (parse_data_runs).
 MFT fixup uygulama mantığı (apply_fixup).
 Geliştirme ve İyileştirmeler:
 
-Önceki Hal ile Karşılaştırma: Daha önceki bir sürüm üzerinde birlikte çalıştığımızı belirtmişsin ancak benim önceki etkileşimlere dair spesifik bir hafızam bulunmuyor. Bu nedenle doğrudan bir karşılaştırma yapamam. Ancak mevcut kodun oldukça gelişmiş özellikler içerdiğini söyleyebilirim.
 Tamlık Kontrolü:
+
 Eksik Modüller/Fonksiyonlar: main.cpp dosyası tree_view.h, duplicate_finder.h ve index_manager.h başlık dosyalarını içeriyor ve display_tree_view(), find_duplicates(), save_index(), load_index(), list_files_sorted() gibi fonksiyonları çağırıyor. Ancak bu başlık dosyaları ve ilgili .cpp dosyaları (ve dolayısıyla bu fonksiyonların implementasyonları) bana sunulan dosyalar arasında bulunmuyor. Bu, projenin şu anki haliyle tam olarak derlenip çalışması için önemli bir eksikliktir.
 Eksik Kod: search_engine.cpp dosyasındaki search_files fonksiyonunun implementasyonu yarım kalmış görünüyor. FTS sorgusu oluşturulmaya başlanmış ancak sorgunun çalıştırılması ve sonuçların işlenmesi kısmı eksik.
+
 Kod Kalitesi ve Tasarım:
+
 Modülerlik: Proje, işlevselliği mantıksal modüllere (tarama, veritabanı, arama, yardımcı fonksiyonlar) ayırma konusunda iyi bir iş çıkarmış.
 Global Değişkenler: g_db, g_db_mutex, g_total_files_found, g_total_dirs_found gibi global değişkenler kullanılmış. Daha büyük projelerde veya ekip çalışmalarında bu değişkenleri bir sınıf içinde yönetmek (örneğin bir DatabaseManager sınıfı veya AppContext sınıfı) daha iyi bir tasarım olabilir. Ancak projenin mevcut ölçeği için kabul edilebilir.
 Hata Yönetimi: Kod içerisinde std::wcerr kullanılarak birçok hata durumu kontrol ediliyor ve loglanıyor (örneğin, veritabanı hataları, dosya okuma hataları, MFT ayrıştırma uyarıları). Bu, kodun sağlamlığı açısından olumlu.
 MFT Karmaşıklığı: MFT ayrıştırmak oldukça karmaşık bir işlemdir. Kod, temel öznitelikleri başarılı bir şekilde işliyor ancak $ATTRIBUTE_LIST gibi daha karmaşık durumların (bir dosyanın bilgilerinin birden fazla MFT kaydına yayılması) işlenmediği belirtilmiş. Bu, bazı dosyalarda eksik bilgiye yol açabilir ancak projenin kapsamını yönetilebilir tutmak için makul bir basitleştirme olabilir.
 Platform Bağımlılığı: Kod, Windows API'lerine (örn. CreateFileW, DeviceIoControl, FILETIME, SYSTEMTIME) ve NTFS yapılarına yoğun bir şekilde bağımlıdır. Bu, projenin doğası gereği kaçınılmazdır.
+
 Sonuç:
 
 Proje, MFT okuma tekniğini kullanarak hızlı dosya indeksleme ve arama sağlama hedefiyle teknik olarak etkileyici bir temel oluşturmuş. Paralel tarama, SQLite FTS5 kullanımı ve detaylı MFT ayrıştırma gibi özellikler içeriyor. Ancak, search_engine.cpp'deki yarım kalmış kod ve main.cpp'de çağrılan ancak dosyaları/implementasyonları sağlanmayan diğer modüller (tree view, duplicate finder, index manager) nedeniyle proje şu anki haliyle tam olarak işlevsel değil. Bu eksik kısımların tamamlanması gerekiyor.
 
 Kontrolleri bana bıraktığın için teşekkürler. Umarım bu detaylı inceleme faydalı olur!
+
 --------------------------------------------------------------------------------------------------------------------
 
-* ENGLISH *
-
-* AI COMMENT ABOUT THE PROJECT.
+* AI COMMENT ABOUT THE PROJECT *
 
 Hello! I have reviewed the current version of the project. It is a very comprehensive and technical study that indexes the file system by reading the NTFS Master File Table (MFT) and provides searching using the SQLite database.
 
@@ -81,7 +83,6 @@ Parse MFT Data Runs (parse_data_runs).
 MFT fixup application logic (apply_fixup).
 Improvements and Enhancements:
 
-Comparison with Previous Version: You mentioned that we worked together on a previous version, but I don't have a specific memory of our previous interactions. So I can't make a direct comparison. However, I can say that the current code has quite advanced features.
 Completeness Check:
 Missing Modules/Functions: The main.cpp file contains the header files tree_view.h, duplicate_finder.h, and index_manager.h, and calls functions such as display_tree_view(), find_duplicates(), save_index(), load_index(), list_files_sorted(). However, these header files and the related .cpp files (and therefore the implementations of these functions) are not among the files provided to me. This is a significant deficiency for the project to compile and run properly in its current state.
 Missing Code: The implementation of the search_files function in the search_engine.cpp file seems to be incomplete. The FTS query has started to be created, but the part about running the query and processing the results is missing.
@@ -90,4 +91,13 @@ Code Quality and Design:
 Modularity: The project does a good job of separating the functionality into logical modules (scan, database, search, helper functions).
 Global Variables: Global variables such as g_db, g_db_mutex, g_total_files_found, g_total_dirs_found are used. In larger projects or teamwork, managing these variables in a class (e.g. a DatabaseManager class or an AppContext class) may be a better design. However, for the current scale of the project, it is acceptable.
 Error Management: Many error conditions are checked and logged in the code using std::wcerr (e.g. database errors, file read errors, MFT parsing warnings). This is positive in terms of the robustness of the code.
-MFT Complexity: Parsing MFTs is a very complex process. The code successfully handles basic attributes, but more complex cases such as $ATTRIBUTE_LIST (where a file's information is spread across multiple MFT records) are not handled. This may result in missing information for some files.
+
+MFT Complexity: Parsing the MFT is a fairly complex process. The code successfully handles basic attributes, but it is noted that more complex cases such as $ATTRIBUTE_LIST (where a file's information is spread across multiple MFT records) are not handled. This may result in missing information in some files, but it is a reasonable simplification to keep the scope of the project manageable.
+
+Platform Dependency: The code is heavily dependent on Windows APIs (e.g. CreateFileW, DeviceIoControl, FILETIME, SYSTEMTIME) and NTFS structures. This is unavoidable due to the nature of the project.
+
+Conclusion:
+
+The project has built a technically impressive foundation with the goal of providing fast file indexing and searching using the MFT reading technique. It includes features such as parallel scanning, SQLite FTS5 usage, and detailed MFT parsing. However, the project is not fully functional in its current state due to the unfinished code in search_engine.cpp and other modules (tree view, duplicate finder, index manager) that are called in main.cpp but do not have their files/implementations provided. These missing parts need to be completed.
+
+Thanks for leaving the checks to me. I hope this detailed review is useful!
