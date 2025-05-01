@@ -1,6 +1,5 @@
-GOOGLE GEMINI 2.5 PRO NUN KODLARI INCELEMESI
-*
-*
+Proje Hakkında AI Yorumu :
+
 Merhaba! Projenin güncel halini inceledim. NTFS Master File Table (MFT) okuyarak dosya sistemini indeksleyen ve SQLite veritabanı kullanarak arama yapmayı sağlayan oldukça kapsamlı ve teknik bir çalışma olmuş.
 
 Genel Değerlendirme:
@@ -44,3 +43,51 @@ Sonuç:
 Proje, MFT okuma tekniğini kullanarak hızlı dosya indeksleme ve arama sağlama hedefiyle teknik olarak etkileyici bir temel oluşturmuş. Paralel tarama, SQLite FTS5 kullanımı ve detaylı MFT ayrıştırma gibi özellikler içeriyor. Ancak, search_engine.cpp'deki yarım kalmış kod ve main.cpp'de çağrılan ancak dosyaları/implementasyonları sağlanmayan diğer modüller (tree view, duplicate finder, index manager) nedeniyle proje şu anki haliyle tam olarak işlevsel değil. Bu eksik kısımların tamamlanması gerekiyor.
 
 Kontrolleri bana bıraktığın için teşekkürler. Umarım bu detaylı inceleme faydalı olur!
+--------------------------------------------------------------------------------------------------------------------
+
+* ENGLISH *
+
+* AI COMMENT ABOUT THE PROJECT.
+
+Hello! I have reviewed the current version of the project. It is a very comprehensive and technical study that indexes the file system by reading the NTFS Master File Table (MFT) and provides searching using the SQLite database.
+
+General Evaluation:
+
+The project uses an advanced technique such as reading the MFT directly for file indexing. This approach can be much faster than traditional file system navigation, especially during the initial scan. Using SQLite and FTS5 (Full-Text Search) is an efficient method for storage and searching operations. The code generally includes modern C++ features (e.g. SafeHandle for RAII, use of standard libraries), error handling and performance optimizations (parallel disk scanning, SQLite PRAGMA settings, prepared statements and transaction usage).
+
+Modules and Functionality:
+
+main.cpp: The main entry point of the program. Manages the user menu, calls functions from other modules (scanning, searching, etc.). Contains locale and console code page settings for Turkish character support. Indicates the need for administrator rights.
+file_scanner.cpp / .h: The heart of the project. Contains the logic for reading and parsing MFT.
+
+Finds suitable NTFS drives and runs the scan_mft_for_drive function in parallel for each one.
+
+Directly accesses the disk volume using Windows API (requires admin rights), reads MFT data, parses MFT records (FILE or BAAD signed).
+Extracts information such as file name, size, timestamps, MFT references by processing important attributes such as $STANDARD_INFORMATION and $FILE_NAME.
+Applies apply_fixup to fix end-of-sector corruptions in MFT records.
+Generates full file paths using parent MFT references with the reconstruct_paths function.
+Determines the location of the file or MFT on disk by parsing Data Runs in the $DATA attribute.
+database_manager.cpp / .h: Manages SQLite database operations.
+init_db: Establishes database connection, creates files main table and fts_files virtual FTS5 table for searching. Makes PRAGMA settings for performance (WAL mode, cache size etc.) and defines triggers to keep FTS table up to date. Also creates necessary indexes.
+
+write_to_db: Writes parsed file information to database in bulk (vector<FileData>). Uses transaction and prepared statement for performance. Updates current data using ON CONFLICT DO UPDATE for records with same MFT reference. Uses mutex for thread safety during parallel scan.
+
+close_db: Closes database connection and performs WAL checkpoint.
+utils.cpp / .h: Contains auxiliary functions.
+Converts FILETIME format to readable date/time string (filetime_to_wstring).
+Formats file size as KB/MB/GB (format_filesize).
+Extracts MFT reference number from full reference (get_mft_ref_number_only).
+Parse MFT Data Runs (parse_data_runs).
+MFT fixup application logic (apply_fixup).
+Improvements and Enhancements:
+
+Comparison with Previous Version: You mentioned that we worked together on a previous version, but I don't have a specific memory of our previous interactions. So I can't make a direct comparison. However, I can say that the current code has quite advanced features.
+Completeness Check:
+Missing Modules/Functions: The main.cpp file contains the header files tree_view.h, duplicate_finder.h, and index_manager.h, and calls functions such as display_tree_view(), find_duplicates(), save_index(), load_index(), list_files_sorted(). However, these header files and the related .cpp files (and therefore the implementations of these functions) are not among the files provided to me. This is a significant deficiency for the project to compile and run properly in its current state.
+Missing Code: The implementation of the search_files function in the search_engine.cpp file seems to be incomplete. The FTS query has started to be created, but the part about running the query and processing the results is missing.
+
+Code Quality and Design:
+Modularity: The project does a good job of separating the functionality into logical modules (scan, database, search, helper functions).
+Global Variables: Global variables such as g_db, g_db_mutex, g_total_files_found, g_total_dirs_found are used. In larger projects or teamwork, managing these variables in a class (e.g. a DatabaseManager class or an AppContext class) may be a better design. However, for the current scale of the project, it is acceptable.
+Error Management: Many error conditions are checked and logged in the code using std::wcerr (e.g. database errors, file read errors, MFT parsing warnings). This is positive in terms of the robustness of the code.
+MFT Complexity: Parsing MFTs is a very complex process. The code successfully handles basic attributes, but more complex cases such as $ATTRIBUTE_LIST (where a file's information is spread across multiple MFT records) are not handled. This may result in missing information for some files.
