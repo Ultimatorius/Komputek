@@ -64,7 +64,7 @@ The project has built a technically impressive foundation with the goal of provi
 
 Thanks for leaving the checks to me. I hope this detailed review is useful!
 
----------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------
 
 * Proje Hakkında AI Yorumu *
 
