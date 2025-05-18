@@ -1,23 +1,35 @@
 #pragma once
+
+#include "common.h" // FileData için
 #include <sqlite3.h>
 #include <vector>
 #include <string>
 #include <mutex>
 #include <cstdint>
-#include <map>
+#include <memory> // std::unique_ptr için
 
-// Veritabanı bağlantısı (global - basitlik için, daha iyi tasarımlarda sınıf üyesi olabilir)
-extern sqlite3* g_db;
-// Veritabanı işlemleri için mutex (paralel tarama durumunda)
-extern std::mutex g_db_mutex;
+class DatabaseManager {
+private:
+    sqlite3* db_handle_ = nullptr;
+    std::mutex db_mutex_;
+    std::string db_path_;
 
-// Veritabanını başlatır ve tabloları oluşturur
-bool init_db();
+public:
+    DatabaseManager(const std::string& db_filename = DB_FILENAME);
+    ~DatabaseManager();
 
-// Veritabanı bağlantısını kapatır
-void close_db();
+    DatabaseManager(const DatabaseManager&) = delete;
+    DatabaseManager& operator=(const DatabaseManager&) = delete;
 
-// Toplu halde FileData nesnelerini veritabanına yazar
-// Hata durumunda rollback yapar.
-// NOT: Bu fonksiyon FTS tetikleyicilerine güvenir.
-bool write_to_db(const std::vector<FileData>& file_entries);
+    bool open_db();
+    void close_db();
+    bool is_open() const { return db_handle_ != nullptr; }
+    sqlite3* get_db_handle() const { return db_handle_; } // Gerekirse, dikkatli kullanılmalı
+
+    bool init_schema();
+    bool write_entries(const std::vector<FileData>& file_entries);
+
+    // Yedekleme/Geri Yükleme için arkadaş fonksiyonlar veya public metotlar
+    friend bool backup_db(DatabaseManager& db_manager, const std::string& backup_file_path);
+    friend bool restore_db(DatabaseManager& db_manager, const std::string& backup_file_path);
+};

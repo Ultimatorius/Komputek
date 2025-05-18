@@ -1,75 +1,69 @@
 #include "database_manager.h"
-#include "utils.h"
-#include "file_scanner.h"
+#include "utils.h" // Gerekirse
+#include <iostream> // std::wcout, std::wcerr için
+#include <chrono>   // Zaman ölçümü için
 
-// SQLite başlık dosyası
-#include <sqlite3.h>
+// Bu global sayaçlar file_scanner modülüne taşındı ve orada yönetiliyor.
+// extern long long g_total_files_found; // file_scanner.cpp içinde static std::atomic oldu
+// extern long long g_total_dirs_found;  // file_scanner.cpp içinde static std::atomic oldu
 
-// Veritabanı bağlantısı (global - basitlik için, daha iyi tasarımlarda sınıf üyesi olabilir)
-sqlite3* g_db = nullptr;
-// Veritabanı işlemleri için mutex (paralel tarama durumunda)
-std::mutex g_db_mutex;
-// Toplam bulunan dosya/dizin sayısı (istatistik için)
-long long g_total_files_found = 0;
-long long g_total_dirs_found = 0;
 
-// Dosya Adı Ad Alanları (FileName Namespace)
-enum class FileNameNamespace : BYTE {
-    POSIX = 0,      // Büyük/küçük harf duyarlı
-    WIN32 = 1,      // Büyük/küçük harf duyarsız (genellikle kullanılır)
-    DOS = 2,      // 8.3 formatı
-    WIN32_DOS = 3 // Hem Win32 hem de DOS adı mevcut
-};
+DatabaseManager::DatabaseManager(const std::string& db_filename) : db_path_(db_filename) {
+    // open_db() çağrısı main veya ihtiyaç duyulan yerde yapılabilir.
+}
 
-// Dosya/Dizin bilgilerini saklamak için yapı
-struct FileData {
-    uint64_t id = 0; // Veritabanı ID'si
-    std::wstring drive; // Sürücü harfi (örn: C:\)
-    std::wstring path; // Tam yol (hesaplanacak)
-    std::wstring name; // Dosya/Dizin adı
-    std::wstring extension; // Dosya uzantısı (varsa)
-    uint64_t size = 0; // Dosya boyutu (byte)
-    uint64_t creation_time = 0; // FILETIME formatında
-    uint64_t modification_time = 0; // FILETIME formatında
-    uint64_t access_time = 0; // FILETIME formatında
-    uint64_t mft_change_time = 0; // $STANDARD_INFORMATION içindeki MFT değişim zamanı
-    uint64_t mft_reference_number = 0; // MFT Kayıt Numarası
-    uint64_t parent_mft_reference_number = 5; // Ebeveyn MFT Kayıt Numarası (Kök dizin için 5 varsayılır)
-    DWORD file_attributes = 0; // Windows dosya öznitelikleri
-    bool is_directory = false;
-    bool is_deleted = false; // MFT kaydı kullanımda değilse
+DatabaseManager::~DatabaseManager() {
+    close_db();
+}
 
-    // FTS için birleştirilmiş metin (yol + isim)
-    std::wstring fts_content() const {
-        return path + L"\\" + name;
-    }
-};
-
-// Veritabanını başlatır ve tabloları oluşturur
-bool init_db() {
-    std::lock_guard<std::mutex> lock(g_db_mutex); // Global DB'ye erişimi kilitle
-
-    if (g_db) {
-        std::wcout << L"Veritabanı zaten açık." << std::endl;
-        return true; // Zaten açıksa tekrar açma
+bool DatabaseManager::open_db() {
+    std::lock_guard<std::mutex> lock(db_mutex_);
+    if (db_handle_) {
+        std::wcout << L"Veritabanı zaten açık: " << widen(db_path_) << std::endl;
+        return true;
     }
 
-    if (sqlite3_open(DB_FILENAME, &g_db)) {
-        std::wcerr << L"Veritabanı açılamadı: " << sqlite3_errmsg16(g_db) << std::endl;
-        g_db = nullptr;
+    if (sqlite3_open(db_path_.c_str(), &db_handle_)) {
+        std::wcerr << L"Veritabanı açılamadı (" << widen(db_path_) << L"): " << sqlite3_errmsg16(db_handle_) << std::endl;
+        db_handle_ = nullptr;
         return false;
     }
-    std::wcout << L"Veritabanı bağlantısı kuruldu: " << DB_FILENAME << std::endl;
+    std::wcout << L"Veritabanı bağlantısı kuruldu: " << widen(db_path_) << std::endl;
 
     // Performans ayarları
     char* err_msg = nullptr;
-    sqlite3_exec(g_db, "PRAGMA journal_mode = WAL;", nullptr, nullptr, &err_msg);
-    sqlite3_exec(g_db, "PRAGMA synchronous = NORMAL;", nullptr, nullptr, &err_msg);
-    sqlite3_exec(g_db, "PRAGMA temp_store = MEMORY;", nullptr, nullptr, &err_msg);
-    sqlite3_exec(g_db, "PRAGMA cache_size = -10000;", nullptr, nullptr, &err_msg); // 10MB önbellek
-    sqlite3_exec(g_db, "PRAGMA busy_timeout = 5000;", nullptr, nullptr, &err_msg); // 5 saniye bekleme süresi
+    sqlite3_exec(db_handle_, "PRAGMA journal_mode = WAL;", nullptr, nullptr, &err_msg);
+    sqlite3_exec(db_handle_, "PRAGMA synchronous = NORMAL;", nullptr, nullptr, &err_msg);
+    sqlite3_exec(db_handle_, "PRAGMA temp_store = MEMORY;", nullptr, nullptr, &err_msg);
+    sqlite3_exec(db_handle_, "PRAGMA cache_size = -10000;", nullptr, nullptr, &err_msg); // 10MB önbellek
+    sqlite3_exec(db_handle_, "PRAGMA busy_timeout = 5000;", nullptr, nullptr, &err_msg); // 5 saniye bekleme süresi
+    if (err_msg) {
+        std::wcerr << L"PRAGMA ayarlanırken hata: " << sqlite3_errmsg16(db_handle_) << std::endl;
+        sqlite3_free(err_msg);
+        // Hata durumunda devam edilebilir ama loglamak iyi olur.
+    }
+    return true;
+}
 
-    // Ana dosya tablosu
+void DatabaseManager::close_db() {
+    std::lock_guard<std::mutex> lock(db_mutex_);
+    if (db_handle_) {
+        sqlite3_wal_checkpoint_v2(db_handle_, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
+        sqlite3_close(db_handle_);
+        db_handle_ = nullptr;
+        std::wcout << L"Veritabanı bağlantısı kapatıldı: " << widen(db_path_) << std::endl;
+    }
+}
+
+bool DatabaseManager::init_schema() {
+    if (!db_handle_) {
+        std::wcerr << L"Veritabanı açık değil, şema oluşturulamıyor." << std::endl;
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(db_mutex_); // DB'ye erişimi kilitle
+
+    char* err_msg = nullptr;
+
     const char* create_files_table_query = R"(
         CREATE TABLE IF NOT EXISTS files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,7 +76,7 @@ bool init_db() {
             modification_time INTEGER DEFAULT 0,
             access_time INTEGER DEFAULT 0,
             mft_change_time INTEGER DEFAULT 0,
-            mft_ref INTEGER UNIQUE NOT NULL, -- MFT referansı benzersiz olmalı
+            mft_ref INTEGER UNIQUE NOT NULL,
             parent_mft_ref INTEGER NOT NULL,
             attributes INTEGER DEFAULT 0,
             is_directory INTEGER NOT NULL DEFAULT 0,
@@ -90,111 +84,71 @@ bool init_db() {
         );
     )";
 
-    // Full-Text Search (FTS5) tablosu (dosya yolu ve adı için)
-    // content='files' : files tablosu silindiğinde FTS girdileri de silinir
-    // content_rowid='id' : files.id ile eşleşir
-    // tokenize='unicode61 remove_diacritics 2' : Unicode desteği, aksanları kaldır, noktalama işaretlerini ayırıcı yapma
     const char* create_fts_table_query = R"(
         CREATE VIRTUAL TABLE IF NOT EXISTS fts_files USING fts5(
-            fts_content,                 -- İndekslenecek metin (yol + isim)
-            content='files',             -- Ana tablo
-            content_rowid='id',          -- Ana tablonun ID'si
+            fts_content,
+            content='files',
+            content_rowid='id',
             tokenize='unicode61 remove_diacritics 2'
         );
     )";
 
-    // FTS tablosunu tetikleyicilerle otomatik güncel tutma
     const char* create_fts_triggers_query = R"(
-        -- Dosya eklendiğinde FTS'e ekle
         CREATE TRIGGER IF NOT EXISTS files_ai AFTER INSERT ON files BEGIN
             INSERT INTO fts_files (rowid, fts_content) VALUES (new.id, new.path || '\' || new.name);
         END;
-        -- Dosya silindiğinde FTS'den sil (aslında FTS kendi hallediyor content= sayesinde ama garanti olsun)
         CREATE TRIGGER IF NOT EXISTS files_ad AFTER DELETE ON files BEGIN
             DELETE FROM fts_files WHERE rowid = old.id;
         END;
-        -- Dosya güncellendiğinde FTS'i güncelle
         CREATE TRIGGER IF NOT EXISTS files_au AFTER UPDATE ON files BEGIN
             UPDATE fts_files SET fts_content = new.path || '\' || new.name WHERE rowid = old.id;
         END;
     )";
 
-
-    if (sqlite3_exec(g_db, create_files_table_query, nullptr, nullptr, &err_msg) != SQLITE_OK) {
-        std::wcerr << L"Ana tablo oluşturulurken hata: " << sqlite3_errmsg16(g_db) << std::endl;
+    if (sqlite3_exec(db_handle_, create_files_table_query, nullptr, nullptr, &err_msg) != SQLITE_OK) {
+        std::wcerr << L"Ana tablo oluşturulurken hata: " << sqlite3_errmsg16(db_handle_) << std::endl;
         sqlite3_free(err_msg);
-        sqlite3_close(g_db);
-        g_db = nullptr;
         return false;
     }
-    if (sqlite3_exec(g_db, create_fts_table_query, nullptr, nullptr, &err_msg) != SQLITE_OK) {
-        std::wcerr << L"FTS tablosu oluşturulurken hata: " << sqlite3_errmsg16(g_db) << std::endl;
+    if (sqlite3_exec(db_handle_, create_fts_table_query, nullptr, nullptr, &err_msg) != SQLITE_OK) {
+        std::wcerr << L"FTS tablosu oluşturulurken hata: " << sqlite3_errmsg16(db_handle_) << std::endl;
         std::wcerr << L"Muhtemel Neden: SQLite sürümünüz FTS5'i desteklemiyor olabilir veya FTS5 derleme sırasında etkinleştirilmemiş olabilir." << std::endl;
         sqlite3_free(err_msg);
-        // FTS olmadan devam edilebilir ama arama yavaş olur. Şimdilik kapatıyoruz.
-        sqlite3_close(g_db);
-        g_db = nullptr;
         return false;
     }
-    if (sqlite3_exec(g_db, create_fts_triggers_query, nullptr, nullptr, &err_msg) != SQLITE_OK) {
-        std::wcerr << L"FTS tetikleyicileri oluşturulurken hata: " << sqlite3_errmsg16(g_db) << std::endl;
+    if (sqlite3_exec(db_handle_, create_fts_triggers_query, nullptr, nullptr, &err_msg) != SQLITE_OK) {
+        std::wcerr << L"FTS tetikleyicileri oluşturulurken hata: " << sqlite3_errmsg16(db_handle_) << std::endl;
         sqlite3_free(err_msg);
-        // Tetikleyiciler olmadan FTS çalışmaz, kapatıyoruz.
-        sqlite3_close(g_db);
-        g_db = nullptr;
         return false;
     }
 
-    // İndeksler (Arama ve sıralama performansını artırır)
-    // MFT Ref zaten UNIQUE olduğu için otomatik indekslidir.
-    sqlite3_exec(g_db, "CREATE INDEX IF NOT EXISTS idx_files_path ON files (path);", nullptr, nullptr, &err_msg);
-    sqlite3_exec(g_db, "CREATE INDEX IF NOT EXISTS idx_files_name ON files (name);", nullptr, nullptr, &err_msg);
-    sqlite3_exec(g_db, "CREATE INDEX IF NOT EXISTS idx_files_parent ON files (parent_mft_ref);", nullptr, nullptr, &err_msg);
-    sqlite3_exec(g_db, "CREATE INDEX IF NOT EXISTS idx_files_size ON files (size);", nullptr, nullptr, &err_msg);
-    sqlite3_exec(g_db, "CREATE INDEX IF NOT EXISTS idx_files_modtime ON files (modification_time);", nullptr, nullptr, &err_msg);
-    sqlite3_exec(g_db, "CREATE INDEX IF NOT EXISTS idx_files_name_size ON files (name, size);", nullptr, nullptr, &err_msg); // Yinelenen bulma için
+    sqlite3_exec(db_handle_, "CREATE INDEX IF NOT EXISTS idx_files_path ON files (path);", nullptr, nullptr, &err_msg);
+    sqlite3_exec(db_handle_, "CREATE INDEX IF NOT EXISTS idx_files_name ON files (name);", nullptr, nullptr, &err_msg);
+    sqlite3_exec(db_handle_, "CREATE INDEX IF NOT EXISTS idx_files_parent ON files (parent_mft_ref);", nullptr, nullptr, &err_msg);
+    sqlite3_exec(db_handle_, "CREATE INDEX IF NOT EXISTS idx_files_size ON files (size);", nullptr, nullptr, &err_msg);
+    sqlite3_exec(db_handle_, "CREATE INDEX IF NOT EXISTS idx_files_modtime ON files (modification_time);", nullptr, nullptr, &err_msg);
+    sqlite3_exec(db_handle_, "CREATE INDEX IF NOT EXISTS idx_files_name_size ON files (name, size);", nullptr, nullptr, &err_msg);
 
     std::wcout << L"Veritabanı şeması hazırlandı." << std::endl;
     return true;
 }
 
-// Veritabanı bağlantısını kapatır
-void close_db() {
-    std::lock_guard<std::mutex> lock(g_db_mutex);
-    if (g_db) {
-        // Bekleyen WAL checkpoint'ini yap (veriyi ana db dosyasına yaz)
-        sqlite3_wal_checkpoint_v2(g_db, nullptr, SQLITE_CHECKPOINT_TRUNCATE, nullptr, nullptr);
-        sqlite3_close(g_db);
-        g_db = nullptr;
-        std::wcout << L"Veritabanı bağlantısı kapatıldı." << std::endl;
-    }
-}
-
-// Toplu halde FileData nesnelerini veritabanına yazar
-// Hata durumunda rollback yapar.
-// NOT: Bu fonksiyon FTS tetikleyicilerine güvenir.
-bool write_to_db(const std::vector<FileData>& file_entries) {
-    if (!g_db || file_entries.empty()) {
+bool DatabaseManager::write_entries(const std::vector<FileData>& file_entries) {
+    if (!db_handle_ || file_entries.empty()) {
         return false;
     }
-
-    // Veritabanı işlemi için kilitle
-    std::lock_guard<std::mutex> lock(g_db_mutex);
+    std::lock_guard<std::mutex> lock(db_mutex_);
 
     std::wcout << L"📥 " << file_entries.size() << L" adet girdi veritabanına yazılıyor..." << std::endl;
     auto start_time = std::chrono::high_resolution_clock::now();
 
     char* err_msg = nullptr;
-    // Transaction başlat
-    if (sqlite3_exec(g_db, "BEGIN TRANSACTION;", nullptr, nullptr, &err_msg) != SQLITE_OK) {
-        std::wcerr << L"Transaction başlatılamadı: " << sqlite3_errmsg16(g_db) << std::endl;
+    if (sqlite3_exec(db_handle_, "BEGIN TRANSACTION;", nullptr, nullptr, &err_msg) != SQLITE_OK) {
+        std::wcerr << L"Transaction başlatılamadı: " << sqlite3_errmsg16(db_handle_) << std::endl;
         sqlite3_free(err_msg);
         return false;
     }
 
-    // Hazırlanmış sorgu (performans için)
-    // ON CONFLICT(mft_ref) DO UPDATE: Eğer aynı MFT referansı zaten varsa, eski kaydı güncelle.
-    // Bu, tekrar tarama yapıldığında verilerin güncellenmesini sağlar.
     const char* insert_sql = R"(
         INSERT INTO files (drive, path, name, extension, size, creation_time, modification_time,
                            access_time, mft_change_time, mft_ref, parent_mft_ref, attributes,
@@ -216,17 +170,15 @@ bool write_to_db(const std::vector<FileData>& file_entries) {
             is_deleted=excluded.is_deleted;
     )";
 
-    // Hazırlama fonksiyonu (wchar_t için, UTF-8 daha standart)
     sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(g_db, insert_sql, -1, &stmt, nullptr) != SQLITE_OK) {
-        std::wcerr << L"SQLite Prepare Hatası: " << sqlite3_errmsg16(g_db) << std::endl;
-        sqlite3_exec(g_db, "ROLLBACK;", nullptr, nullptr, nullptr); // Hata durumunda geri al
+    if (sqlite3_prepare_v2(db_handle_, insert_sql, -1, &stmt, nullptr) != SQLITE_OK) {
+        std::wcerr << L"SQLite Prepare Hatası: " << sqlite3_errmsg16(db_handle_) << std::endl;
+        sqlite3_exec(db_handle_, "ROLLBACK;", nullptr, nullptr, nullptr);
         return false;
     }
 
     int success_count = 0;
     for (const auto& file : file_entries) {
-        // UTF-16 wstring'leri bind etmek için sqlite3_bind_text16 kullanılır
         sqlite3_bind_text16(stmt, 1, file.drive.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text16(stmt, 2, file.path.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text16(stmt, 3, file.name.c_str(), -1, SQLITE_TRANSIENT);
@@ -244,22 +196,20 @@ bool write_to_db(const std::vector<FileData>& file_entries) {
 
         if (sqlite3_step(stmt) != SQLITE_DONE) {
             std::wcerr << L"Veri eklenirken/güncellenirken hata (MFT Ref: " << file.mft_reference_number << L"): "
-                       << sqlite3_errmsg16(g_db) << std::endl;
-            // Tek bir hata tüm işlemi geri almasın diye devam edebiliriz, ama transaction'ı bozabilir.
-            // Şimdilik işlemi geri alıp çıkalım.
-            sqlite3_exec(g_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+                       << sqlite3_errmsg16(db_handle_) << std::endl;
+            sqlite3_exec(db_handle_, "ROLLBACK;", nullptr, nullptr, nullptr);
+            sqlite3_finalize(stmt); // finalize before returning
             return false;
         }
         success_count++;
-        sqlite3_reset(stmt); // Statement'ı sonraki kullanım için resetle
+        sqlite3_reset(stmt);
     }
 
-    // Transaction'ı bitir (Commit)
-    if (sqlite3_exec(g_db, "COMMIT;", nullptr, nullptr, &err_msg) != SQLITE_OK) {
-        std::wcerr << L"Transaction tamamlanırken hata: " << sqlite3_errmsg16(g_db) << std::endl;
+    if (sqlite3_exec(db_handle_, "COMMIT;", nullptr, nullptr, &err_msg) != SQLITE_OK) {
+        std::wcerr << L"Transaction tamamlanırken hata: " << sqlite3_errmsg16(db_handle_) << std::endl;
         sqlite3_free(err_msg);
-        // Commit hatası ciddi bir sorundur, ancak burada sadece loglayıp geçiyoruz.
-        return false; // Başarısız kabul edelim
+        sqlite3_finalize(stmt); // finalize before returning
+        return false;
     }
 
     auto end_time = std::chrono::high_resolution_clock::now();
